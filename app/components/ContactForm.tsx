@@ -140,7 +140,7 @@ export default function ContactForm() {
           <option value="" disabled>
             Select a goal
           </option>
-          <option value="Competition math">Competition math</option>
+          <option value="Competition math">Mathcounts</option>
           <option value="AMC and AIME preparation">
             AMC / AIME preparation
           </option>

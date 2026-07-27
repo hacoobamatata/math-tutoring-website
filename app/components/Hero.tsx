@@ -14,8 +14,8 @@ export default function Hero() {
         </h1>
 
         <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300 sm:text-xl">
-          Personalized coaching for students preparing for the AMC 8, AMC 10,
-          AMC 12, AIME, and other competition-math challenges.
+          Personalized coaching for students preparing for Mathcounts, AMC 8, AMC 10,
+          AMC 12, AIME, and other math challenges.
         </p>
 
         <div className="mt-8 flex flex-col gap-4 sm:flex-row">
@@ -41,7 +41,7 @@ export default function Hero() {
           />
 
           <Credential
-            title="Michigan CS"
+            title="University of Michigan CS"
             description="Computer Science student at the University of Michigan."
           />
 

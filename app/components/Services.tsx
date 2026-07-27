@@ -55,9 +55,9 @@ export default function Services() {
           title="Competition Preparation"
           description="Structured preparation for students working toward stronger contest results."
           topics={[
-            "AMC 8, AMC 10, and AMC 12",
-            "AIME preparation",
-            "Timed practice and test strategy",
+            "Mathcounts preparation",
+            "AMC 8, AMC 10, AMC 12, and AIME",
+            "Improve accuracy and test strategy",
           ]}
         />
 
@@ -65,9 +65,9 @@ export default function Services() {
           title="Problem-Solving Development"
           description="Build the habits and techniques needed to approach unfamiliar problems confidently."
           topics={[
-            "Algebra and number theory",
+            "Algebra and Number Theory",
             "Geometry",
-            "Combinatorics and probability",
+            "Counting and Probability",
           ]}
         />
 
