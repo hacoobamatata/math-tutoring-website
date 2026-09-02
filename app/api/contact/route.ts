@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     }
 
     const { error } = await resend.emails.send({
-      from: "Tutoring Website <onboarding@resend.dev>",
+      from: "Jacob Xu Math <contact@jacobxumath.com>",
       to: contactEmail,
       replyTo: email,
       subject: `New tutoring request from ${name}`,
