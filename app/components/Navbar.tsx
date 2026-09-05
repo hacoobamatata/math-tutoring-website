@@ -1,3 +1,9 @@
+import {
+  Show,
+  SignInButton,
+  UserButton,
+} from "@clerk/nextjs";
+
 export default function Navbar() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur">
@@ -24,6 +30,17 @@ export default function Navbar() {
           >
             Contact
           </a>
+
+          <Show when="signed-out">
+            <SignInButton />
+          </Show>
+
+          <Show when="signed-in">
+            <a href="/dashboard" className="transition hover:text-white">
+              Dashboard
+            </a>
+            <UserButton />
+          </Show>
         </div>
       </nav>
     </header>
