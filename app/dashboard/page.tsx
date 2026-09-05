@@ -1,7 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { createTutoringSession, saveStudentProfile } from "./actions";
+import {
+  createTutoringSession,
+  deleteTutoringSession,
+  saveStudentProfile,
+  updateTutoringSession,
+} from "./actions";
 
 const errorMessages = {
   name: "Enter a preferred name between 1 and 80 characters.",
@@ -12,6 +17,7 @@ const errorMessages = {
   student: "Choose an existing student account.",
   start: "Enter a valid session start date and time.",
   sessionNotes: "Keep session notes under 2,000 characters.",
+  session: "That session was not found or was created by another staff user.",
 } as const;
 
 type DashboardPageProps = {
@@ -19,6 +25,8 @@ type DashboardPageProps = {
     error?: string | string[];
     saved?: string | string[];
     created?: string | string[];
+    updated?: string | string[];
+    deleted?: string | string[];
   }>;
 };
 
@@ -56,6 +64,7 @@ export default async function DashboardPage({
         where: { createdById: appUser.id },
         select: {
           id: true,
+          studentId: true,
           startsAt: true,
           notes: true,
           student: {
@@ -74,6 +83,14 @@ export default async function DashboardPage({
       errorCode && errorCode in errorMessages
         ? errorMessages[errorCode as keyof typeof errorMessages]
         : undefined;
+    const successMessage =
+      query.created === "1"
+        ? "Tutoring session created."
+        : query.updated === "1"
+          ? "Tutoring session updated."
+          : query.deleted === "1"
+            ? "Tutoring session deleted."
+            : undefined;
 
     return (
       <main className="min-h-screen bg-slate-950 text-white">
@@ -101,12 +118,12 @@ export default async function DashboardPage({
             </p>
           )}
 
-          {query.created === "1" && (
+          {successMessage && (
             <p
               role="status"
               className="mt-6 rounded-lg border border-emerald-800 bg-emerald-950/50 p-4 text-emerald-200"
             >
-              Tutoring session created.
+              {successMessage}
             </p>
           )}
 
@@ -187,30 +204,126 @@ export default async function DashboardPage({
               <p className="mt-4 text-slate-400">No sessions created yet.</p>
             ) : (
               <ul className="mt-4 space-y-4">
-                {sessions.map((session) => (
-                  <li
-                    key={session.id}
-                    className="rounded-lg border border-slate-800 bg-slate-900 p-5"
-                  >
-                    <p className="font-semibold">
-                      {session.student.studentProfile?.preferredName ??
-                        "Student"}
-                    </p>
-                    <p className="mt-1 text-slate-300">
-                      {session.startsAt.toLocaleString("en-US", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                        timeZone: "UTC",
-                      })}{" "}
-                      UTC
-                    </p>
-                    {session.notes && (
-                      <p className="mt-3 whitespace-pre-wrap text-slate-400">
-                        {session.notes}
+                {sessions.map((session) => {
+                  const studentIsEligible = students.some(
+                    (student) => student.id === session.studentId,
+                  );
+
+                  return (
+                    <li
+                      key={session.id}
+                      className="rounded-lg border border-slate-800 bg-slate-900 p-5"
+                    >
+                      <p className="font-semibold">
+                        {session.student.studentProfile?.preferredName ??
+                          "Student"}
                       </p>
-                    )}
-                  </li>
-                ))}
+                      <p className="mt-1 text-sm text-slate-400">
+                        Created session · editable in UTC
+                      </p>
+
+                      <form
+                        action={updateTutoringSession}
+                        className="mt-5 space-y-4"
+                      >
+                        <input
+                          type="hidden"
+                          name="sessionId"
+                          value={session.id}
+                        />
+
+                        <div>
+                          <label
+                            htmlFor={`student-${session.id}`}
+                            className="block font-medium"
+                          >
+                            Student
+                          </label>
+                          <select
+                            id={`student-${session.id}`}
+                            name="studentId"
+                            required
+                            defaultValue={session.studentId}
+                            className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                          >
+                            {!studentIsEligible && (
+                              <option value={session.studentId} disabled>
+                                Current student is no longer eligible
+                              </option>
+                            )}
+                            {students.map((student) => (
+                              <option key={student.id} value={student.id}>
+                                {student.studentProfile?.preferredName ??
+                                  "Student"}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor={`starts-at-${session.id}`}
+                            className="block font-medium"
+                          >
+                            Start time (UTC)
+                          </label>
+                          <input
+                            id={`starts-at-${session.id}`}
+                            name="startsAt"
+                            type="datetime-local"
+                            required
+                            defaultValue={session.startsAt
+                              .toISOString()
+                              .slice(0, 16)}
+                            className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor={`notes-${session.id}`}
+                            className="block font-medium"
+                          >
+                            Notes
+                          </label>
+                          <textarea
+                            id={`notes-${session.id}`}
+                            name="notes"
+                            rows={4}
+                            maxLength={2000}
+                            defaultValue={session.notes ?? ""}
+                            className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={students.length === 0}
+                          className="rounded-lg bg-blue-600 px-4 py-2 font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Save changes
+                        </button>
+                      </form>
+
+                      <form
+                        action={deleteTutoringSession}
+                        className="mt-4 border-t border-slate-800 pt-4"
+                      >
+                        <input
+                          type="hidden"
+                          name="sessionId"
+                          value={session.id}
+                        />
+                        <button
+                          type="submit"
+                          className="rounded-lg border border-red-800 px-4 py-2 font-semibold text-red-300 transition hover:bg-red-950"
+                        >
+                          Delete session
+                        </button>
+                      </form>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

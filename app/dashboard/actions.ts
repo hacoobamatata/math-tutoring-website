@@ -25,6 +25,57 @@ function isUuid(value: string) {
   );
 }
 
+async function requireStaffUser() {
+  const { userId: clerkUserId } = await auth();
+
+  if (!clerkUserId) {
+    redirect("/sign-in");
+  }
+
+  const currentUser = await prisma.appUser.findUnique({
+    where: { clerkUserId },
+    select: { id: true, role: true },
+  });
+
+  if (
+    !currentUser ||
+    (currentUser.role !== "TUTOR" && currentUser.role !== "ADMIN")
+  ) {
+    redirect("/dashboard?error=forbidden");
+  }
+
+  return currentUser;
+}
+
+function readSessionInput(formData: FormData) {
+  const studentId = readText(formData, "studentId");
+  const startsAtValue = readText(formData, "startsAt");
+  const notes = readText(formData, "notes");
+
+  if (!isUuid(studentId)) {
+    redirect("/dashboard?error=student");
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startsAtValue)) {
+    redirect("/dashboard?error=start");
+  }
+
+  const startsAt = new Date(`${startsAtValue}:00.000Z`);
+
+  if (
+    Number.isNaN(startsAt.getTime()) ||
+    startsAt.toISOString().slice(0, 16) !== startsAtValue
+  ) {
+    redirect("/dashboard?error=start");
+  }
+
+  if (notes.length > 2000) {
+    redirect("/dashboard?error=sessionNotes");
+  }
+
+  return { studentId, startsAt, notes: notes || null };
+}
+
 export async function saveStudentProfile(formData: FormData) {
   const { userId: clerkUserId } = await auth();
 
@@ -100,48 +151,11 @@ export async function saveStudentProfile(formData: FormData) {
 }
 
 export async function createTutoringSession(formData: FormData) {
-  const { userId: clerkUserId } = await auth();
-
-  if (!clerkUserId) {
-    redirect("/sign-in");
-  }
-
-  const currentUser = await prisma.appUser.findUnique({
-    where: { clerkUserId },
-    select: { id: true, role: true },
-  });
-
-  if (
-    !currentUser ||
-    (currentUser.role !== "TUTOR" && currentUser.role !== "ADMIN")
-  ) {
-    redirect("/dashboard?error=forbidden");
-  }
-
-  const studentId = readText(formData, "studentId");
-  const startsAtValue = readText(formData, "startsAt");
-  const notes = readText(formData, "notes");
-
-  if (!isUuid(studentId)) {
-    redirect("/dashboard?error=student");
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startsAtValue)) {
-    redirect("/dashboard?error=start");
-  }
-
-  const startsAt = new Date(`${startsAtValue}:00.000Z`);
-
-  if (Number.isNaN(startsAt.getTime())) {
-    redirect("/dashboard?error=start");
-  }
-
-  if (notes.length > 2000) {
-    redirect("/dashboard?error=sessionNotes");
-  }
+  const currentUser = await requireStaffUser();
+  const sessionInput = readSessionInput(formData);
 
   const student = await prisma.appUser.findFirst({
-    where: { id: studentId, role: "STUDENT" },
+    where: { id: sessionInput.studentId, role: "STUDENT" },
     select: { id: true },
   });
 
@@ -153,11 +167,85 @@ export async function createTutoringSession(formData: FormData) {
     data: {
       studentId: student.id,
       createdById: currentUser.id,
-      startsAt,
-      notes: notes || null,
+      startsAt: sessionInput.startsAt,
+      notes: sessionInput.notes,
     },
   });
 
   revalidatePath("/dashboard");
   redirect("/dashboard?created=1");
+}
+
+export async function updateTutoringSession(formData: FormData) {
+  const currentUser = await requireStaffUser();
+  const sessionId = readText(formData, "sessionId");
+
+  if (!isUuid(sessionId)) {
+    redirect("/dashboard?error=session");
+  }
+
+  const sessionInput = readSessionInput(formData);
+  const [session, student] = await Promise.all([
+    prisma.tutoringSession.findFirst({
+      where: { id: sessionId, createdById: currentUser.id },
+      select: { id: true },
+    }),
+    prisma.appUser.findFirst({
+      where: { id: sessionInput.studentId, role: "STUDENT" },
+      select: { id: true },
+    }),
+  ]);
+
+  if (!session) {
+    redirect("/dashboard?error=session");
+  }
+
+  if (!student) {
+    redirect("/dashboard?error=student");
+  }
+
+  const result = await prisma.tutoringSession.updateMany({
+    where: { id: session.id, createdById: currentUser.id },
+    data: {
+      studentId: student.id,
+      startsAt: sessionInput.startsAt,
+      notes: sessionInput.notes,
+    },
+  });
+
+  if (result.count !== 1) {
+    redirect("/dashboard?error=session");
+  }
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?updated=1");
+}
+
+export async function deleteTutoringSession(formData: FormData) {
+  const currentUser = await requireStaffUser();
+  const sessionId = readText(formData, "sessionId");
+
+  if (!isUuid(sessionId)) {
+    redirect("/dashboard?error=session");
+  }
+
+  const session = await prisma.tutoringSession.findFirst({
+    where: { id: sessionId, createdById: currentUser.id },
+    select: { id: true },
+  });
+
+  if (!session) {
+    redirect("/dashboard?error=session");
+  }
+
+  const result = await prisma.tutoringSession.deleteMany({
+    where: { id: session.id, createdById: currentUser.id },
+  });
+
+  if (result.count !== 1) {
+    redirect("/dashboard?error=session");
+  }
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?deleted=1");
 }
