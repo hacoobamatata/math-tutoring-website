@@ -303,13 +303,54 @@ export async function createAvailabilitySlot(formData: FormData) {
     redirect("/dashboard?error=slotTime");
   }
 
-  await prisma.availabilitySlot.create({
-    data: {
-      createdById: currentUser.id,
-      startsAt,
-      endsAt,
-    },
-  });
+  let created = false;
+
+  try {
+    created = await prisma.$transaction(
+      async (transaction) => {
+        const [overlappingSlot, sessionDuringSlot] = await Promise.all([
+          transaction.availabilitySlot.findFirst({
+            where: {
+              createdById: currentUser.id,
+              startsAt: { lt: endsAt },
+              endsAt: { gt: startsAt },
+            },
+            select: { id: true },
+          }),
+          transaction.tutoringSession.findFirst({
+            where: {
+              createdById: currentUser.id,
+              startsAt: { gte: startsAt, lt: endsAt },
+            },
+            select: { id: true },
+          }),
+        ]);
+
+        if (overlappingSlot || sessionDuringSlot) {
+          return false;
+        }
+
+        await transaction.availabilitySlot.create({
+          data: {
+            createdById: currentUser.id,
+            startsAt,
+            endsAt,
+          },
+        });
+
+        return true;
+      },
+      { isolationLevel: "Serializable" },
+    );
+  } catch (error) {
+    if (!hasPrismaErrorCode(error, "P2034")) {
+      throw error;
+    }
+  }
+
+  if (!created) {
+    redirect("/dashboard?error=slotConflict");
+  }
 
   revalidatePath("/dashboard");
   redirect("/dashboard?slotCreated=1");
@@ -340,36 +381,70 @@ export async function bookAvailabilitySlot(formData: FormData) {
   let booked = false;
 
   try {
-    booked = await prisma.$transaction(async (transaction) => {
-      const slot = await transaction.availabilitySlot.findFirst({
-        where: {
-          id: slotId,
-          startsAt: { gt: new Date() },
-          booking: { is: null },
-          createdBy: {
-            is: { role: { in: ["TUTOR", "ADMIN"] } },
+    booked = await prisma.$transaction(
+      async (transaction) => {
+        const slot = await transaction.availabilitySlot.findFirst({
+          where: {
+            id: slotId,
+            startsAt: { gt: new Date() },
+            booking: { is: null },
+            createdBy: {
+              is: { role: { in: ["TUTOR", "ADMIN"] } },
+            },
           },
-        },
-        select: { id: true, createdById: true, startsAt: true },
-      });
+          select: {
+            id: true,
+            createdById: true,
+            startsAt: true,
+            endsAt: true,
+          },
+        });
 
-      if (!slot) {
-        return false;
-      }
+        if (!slot) {
+          return false;
+        }
 
-      await transaction.tutoringSession.create({
-        data: {
-          studentId: currentUser.id,
-          createdById: slot.createdById,
-          availabilitySlotId: slot.id,
-          startsAt: slot.startsAt,
-        },
-      });
+        const [overlappingSlot, sessionDuringSlot] = await Promise.all([
+          transaction.availabilitySlot.findFirst({
+            where: {
+              id: { not: slot.id },
+              createdById: slot.createdById,
+              startsAt: { lt: slot.endsAt },
+              endsAt: { gt: slot.startsAt },
+            },
+            select: { id: true },
+          }),
+          transaction.tutoringSession.findFirst({
+            where: {
+              createdById: slot.createdById,
+              startsAt: { gte: slot.startsAt, lt: slot.endsAt },
+            },
+            select: { id: true },
+          }),
+        ]);
 
-      return true;
-    });
+        if (overlappingSlot || sessionDuringSlot) {
+          return false;
+        }
+
+        await transaction.tutoringSession.create({
+          data: {
+            studentId: currentUser.id,
+            createdById: slot.createdById,
+            availabilitySlotId: slot.id,
+            startsAt: slot.startsAt,
+          },
+        });
+
+        return true;
+      },
+      { isolationLevel: "Serializable" },
+    );
   } catch (error) {
-    if (!hasPrismaErrorCode(error, "P2002")) {
+    if (
+      !hasPrismaErrorCode(error, "P2002") &&
+      !hasPrismaErrorCode(error, "P2034")
+    ) {
       throw error;
     }
   }

@@ -44,6 +44,8 @@ const errorMessages = {
   session: "That session was not found or was created by another staff user.",
   slotTime:
     "Enter valid future America/Detroit times with an end after the start. Times skipped during the daylight-saving transition are not valid.",
+  slotConflict:
+    "That time conflicts with another availability slot or tutoring session on your schedule.",
   slotUnavailable: "That availability slot is no longer open.",
   studentOnly: "Only a student account can book an availability slot.",
 } as const;
