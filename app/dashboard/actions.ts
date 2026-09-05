@@ -19,6 +19,12 @@ function isValidTimeZone(timeZone: string) {
   }
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 export async function saveStudentProfile(formData: FormData) {
   const { userId: clerkUserId } = await auth();
 
@@ -55,6 +61,15 @@ export async function saveStudentProfile(formData: FormData) {
     redirect("/dashboard?error=goals");
   }
 
+  const existingUser = await prisma.appUser.findUnique({
+    where: { clerkUserId },
+    select: { role: true },
+  });
+
+  if (existingUser && existingUser.role !== "STUDENT") {
+    redirect("/dashboard");
+  }
+
   const profile = {
     preferredName,
     gradeLevel,
@@ -82,4 +97,67 @@ export async function saveStudentProfile(formData: FormData) {
 
   revalidatePath("/dashboard");
   redirect("/dashboard?saved=1");
+}
+
+export async function createTutoringSession(formData: FormData) {
+  const { userId: clerkUserId } = await auth();
+
+  if (!clerkUserId) {
+    redirect("/sign-in");
+  }
+
+  const currentUser = await prisma.appUser.findUnique({
+    where: { clerkUserId },
+    select: { id: true, role: true },
+  });
+
+  if (
+    !currentUser ||
+    (currentUser.role !== "TUTOR" && currentUser.role !== "ADMIN")
+  ) {
+    redirect("/dashboard?error=forbidden");
+  }
+
+  const studentId = readText(formData, "studentId");
+  const startsAtValue = readText(formData, "startsAt");
+  const notes = readText(formData, "notes");
+
+  if (!isUuid(studentId)) {
+    redirect("/dashboard?error=student");
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startsAtValue)) {
+    redirect("/dashboard?error=start");
+  }
+
+  const startsAt = new Date(`${startsAtValue}:00.000Z`);
+
+  if (Number.isNaN(startsAt.getTime())) {
+    redirect("/dashboard?error=start");
+  }
+
+  if (notes.length > 2000) {
+    redirect("/dashboard?error=sessionNotes");
+  }
+
+  const student = await prisma.appUser.findFirst({
+    where: { id: studentId, role: "STUDENT" },
+    select: { id: true },
+  });
+
+  if (!student) {
+    redirect("/dashboard?error=student");
+  }
+
+  await prisma.tutoringSession.create({
+    data: {
+      studentId: student.id,
+      createdById: currentUser.id,
+      startsAt,
+      notes: notes || null,
+    },
+  });
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?created=1");
 }

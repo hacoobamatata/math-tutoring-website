@@ -12,13 +12,22 @@ datasource db {
   provider = "postgresql"
 }
 
+enum UserRole {
+  STUDENT
+  TUTOR
+  ADMIN
+}
+
 model AppUser {
   id          String   @id @default(uuid()) @db.Uuid
   clerkUserId String   @unique
+  role        UserRole @default(STUDENT)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  studentProfile StudentProfile?
+  studentProfile  StudentProfile?
+  studentSessions TutoringSession[] @relation("StudentSessions")
+  createdSessions TutoringSession[] @relation("CreatedSessions")
 }
 
 model StudentProfile {
@@ -31,6 +40,22 @@ model StudentProfile {
   updatedAt     DateTime @updatedAt
 
   user AppUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TutoringSession {
+  id          String   @id @default(uuid()) @db.Uuid
+  studentId   String   @db.Uuid
+  createdById String   @db.Uuid
+  startsAt    DateTime
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  student   AppUser @relation("StudentSessions", fields: [studentId], references: [id], onDelete: Restrict)
+  createdBy AppUser @relation("CreatedSessions", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([studentId, startsAt])
+  @@index([createdById, startsAt])
 }
 
 model TestRecord {
