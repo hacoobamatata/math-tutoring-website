@@ -2,11 +2,34 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import {
+  bookAvailabilitySlot,
+  createAvailabilitySlot,
   createTutoringSession,
   deleteTutoringSession,
   saveStudentProfile,
   updateTutoringSession,
 } from "./actions";
+
+const staffTimeZone = "America/Detroit";
+const staffDateTimeInputFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: staffTimeZone,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function formatStaffDateTimeInput(date: Date) {
+  const parts = new Map(
+    staffDateTimeInputFormatter
+      .formatToParts(date)
+      .map(({ type, value }) => [type, value]),
+  );
+
+  return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}T${parts.get("hour")}:${parts.get("minute")}`;
+}
 
 const errorMessages = {
   name: "Enter a preferred name between 1 and 80 characters.",
@@ -15,9 +38,14 @@ const errorMessages = {
   goals: "Keep your learning goal under 1,000 characters.",
   forbidden: "You do not have permission to create tutoring sessions.",
   student: "Choose an existing student account.",
-  start: "Enter a valid session start date and time.",
+  start:
+    "Enter a valid America/Detroit session time. Times skipped during the daylight-saving transition are not valid.",
   sessionNotes: "Keep session notes under 2,000 characters.",
   session: "That session was not found or was created by another staff user.",
+  slotTime:
+    "Enter valid future America/Detroit times with an end after the start. Times skipped during the daylight-saving transition are not valid.",
+  slotUnavailable: "That availability slot is no longer open.",
+  studentOnly: "Only a student account can book an availability slot.",
 } as const;
 
 type DashboardPageProps = {
@@ -27,6 +55,8 @@ type DashboardPageProps = {
     created?: string | string[];
     updated?: string | string[];
     deleted?: string | string[];
+    slotCreated?: string | string[];
+    booked?: string | string[];
   }>;
 };
 
@@ -49,7 +79,7 @@ export default async function DashboardPage({
 
   if (appUser?.role === "TUTOR" || appUser?.role === "ADMIN") {
     const isAdmin = appUser.role === "ADMIN";
-    const [students, sessions] = await Promise.all([
+    const [students, sessions, availabilitySlots] = await Promise.all([
       prisma.appUser.findMany({
         where: { role: "STUDENT" },
         select: {
@@ -77,6 +107,26 @@ export default async function DashboardPage({
         },
         orderBy: { startsAt: "asc" },
       }),
+      prisma.availabilitySlot.findMany({
+        where: { createdById: appUser.id },
+        select: {
+          id: true,
+          startsAt: true,
+          endsAt: true,
+          booking: {
+            select: {
+              student: {
+                select: {
+                  studentProfile: {
+                    select: { preferredName: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { startsAt: "asc" },
+      }),
     ]);
     const errorCode = typeof query.error === "string" ? query.error : undefined;
     const errorMessage =
@@ -84,7 +134,9 @@ export default async function DashboardPage({
         ? errorMessages[errorCode as keyof typeof errorMessages]
         : undefined;
     const successMessage =
-      query.created === "1"
+      query.slotCreated === "1"
+        ? "Availability slot created."
+        : query.created === "1"
         ? "Tutoring session created."
         : query.updated === "1"
           ? "Tutoring session updated."
@@ -161,7 +213,7 @@ export default async function DashboardPage({
 
                 <div>
                   <label htmlFor="startsAt" className="block font-medium">
-                    Start time (UTC)
+                    Start time (America/Detroit)
                   </label>
                   <input
                     id="startsAt"
@@ -171,7 +223,8 @@ export default async function DashboardPage({
                     className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
                   />
                   <p className="mt-2 text-sm text-slate-400">
-                    Times use UTC for this initial scheduling milestone.
+                    This time automatically follows Detroit&apos;s EST/EDT
+                    daylight-saving rules.
                   </p>
                 </div>
 
@@ -198,6 +251,107 @@ export default async function DashboardPage({
             )}
           </section>
 
+          <section className="mt-10 rounded-lg border border-slate-800 bg-slate-900 p-6">
+            <h2 className="text-2xl font-semibold">
+              Create an availability slot
+            </h2>
+            <form action={createAvailabilitySlot} className="mt-6 space-y-6">
+              <div>
+                <label htmlFor="slotStartsAt" className="block font-medium">
+                  Start time (America/Detroit)
+                </label>
+                <input
+                  id="slotStartsAt"
+                  name="slotStartsAt"
+                  type="datetime-local"
+                  required
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="slotEndsAt" className="block font-medium">
+                  End time (America/Detroit)
+                </label>
+                <input
+                  id="slotEndsAt"
+                  name="slotEndsAt"
+                  type="datetime-local"
+                  required
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                />
+              </div>
+
+              <p className="text-sm text-slate-400">
+                These times automatically follow Detroit&apos;s EST/EDT
+                daylight-saving rules.
+              </p>
+
+              <button
+                type="submit"
+                className="rounded-lg bg-blue-600 px-5 py-3 font-semibold transition hover:bg-blue-500"
+              >
+                Create slot
+              </button>
+            </form>
+          </section>
+
+          <section className="mt-10">
+            <h2 className="text-2xl font-semibold">
+              Availability slots you created
+            </h2>
+            {availabilitySlots.length === 0 ? (
+              <p className="mt-4 text-slate-400">
+                No availability slots created yet.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-4">
+                {availabilitySlots.map((slot) => (
+                  <li
+                    key={slot.id}
+                    className="rounded-lg border border-slate-800 bg-slate-900 p-5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="font-semibold">
+                        {slot.startsAt.toLocaleString("en-US", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                          timeZone: staffTimeZone,
+                          timeZoneName: "short",
+                        })}
+                        {" – "}
+                        {slot.endsAt.toLocaleTimeString("en-US", {
+                          hour: "numeric",
+                          minute: "2-digit",
+                          timeZone: staffTimeZone,
+                          timeZoneName: "short",
+                        })}
+                      </p>
+                      <span
+                        className={`rounded-full px-3 py-1 text-sm font-medium ${
+                          slot.booking
+                            ? "bg-slate-700 text-slate-200"
+                            : "bg-emerald-500/10 text-emerald-200"
+                        }`}
+                      >
+                        {slot.booking ? "Booked" : "Open"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-400">
+                      {staffTimeZone}
+                      {slot.booking
+                        ? ` · Booked by ${slot.booking.student.studentProfile?.preferredName ?? "Student"}`
+                        : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="mt-10">
             <h2 className="text-2xl font-semibold">Sessions you created</h2>
             {sessions.length === 0 ? (
@@ -219,7 +373,7 @@ export default async function DashboardPage({
                           "Student"}
                       </p>
                       <p className="mt-1 text-sm text-slate-400">
-                        Created session · editable in UTC
+                        Created session · editable in America/Detroit
                       </p>
 
                       <form
@@ -265,16 +419,16 @@ export default async function DashboardPage({
                             htmlFor={`starts-at-${session.id}`}
                             className="block font-medium"
                           >
-                            Start time (UTC)
+                            Start time (America/Detroit)
                           </label>
                           <input
                             id={`starts-at-${session.id}`}
                             name="startsAt"
                             type="datetime-local"
                             required
-                            defaultValue={session.startsAt
-                              .toISOString()
-                              .slice(0, 16)}
+                            defaultValue={formatStaffDateTimeInput(
+                              session.startsAt,
+                            )}
                             className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
                           />
                         </div>
@@ -339,13 +493,27 @@ export default async function DashboardPage({
       ? errorMessages[errorCode as keyof typeof errorMessages]
       : undefined;
   const wasSaved = query.saved === "1";
-  const sessions = appUser
-    ? await prisma.tutoringSession.findMany({
-        where: { studentId: appUser.id },
-        select: { id: true, startsAt: true, notes: true },
-        orderBy: { startsAt: "asc" },
-      })
-    : [];
+  const wasBooked = query.booked === "1";
+  const [sessions, availabilitySlots] = await Promise.all([
+    appUser
+      ? prisma.tutoringSession.findMany({
+          where: { studentId: appUser.id },
+          select: { id: true, startsAt: true, notes: true },
+          orderBy: { startsAt: "asc" },
+        })
+      : Promise.resolve([]),
+    prisma.availabilitySlot.findMany({
+      where: {
+        startsAt: { gt: new Date() },
+        booking: { is: null },
+        createdBy: {
+          is: { role: { in: ["TUTOR", "ADMIN"] } },
+        },
+      },
+      select: { id: true, startsAt: true, endsAt: true },
+      orderBy: { startsAt: "asc" },
+    }),
+  ]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
@@ -372,6 +540,15 @@ export default async function DashboardPage({
             className="mt-6 rounded-lg border border-emerald-800 bg-emerald-950/50 p-4 text-emerald-200"
           >
             Your profile has been saved.
+          </p>
+        )}
+
+        {wasBooked && (
+          <p
+            role="status"
+            className="mt-6 rounded-lg border border-emerald-800 bg-emerald-950/50 p-4 text-emerald-200"
+          >
+            Your tutoring session has been booked.
           </p>
         )}
 
@@ -450,6 +627,57 @@ export default async function DashboardPage({
             {profile ? "Update profile" : "Save profile"}
           </button>
         </form>
+
+        <section className="mt-12 border-t border-slate-800 pt-10">
+          <h2 className="text-2xl font-semibold">Open availability</h2>
+          {!appUser && (
+            <p className="mt-4 text-slate-400">
+              Save your student profile before booking a slot.
+            </p>
+          )}
+          {availabilitySlots.length === 0 ? (
+            <p className="mt-4 text-slate-400">
+              There are no open future slots right now.
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-4">
+              {availabilitySlots.map((slot) => (
+                <li
+                  key={slot.id}
+                  className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-900 p-5"
+                >
+                  <div>
+                    <p className="font-semibold">
+                      {slot.startsAt.toLocaleString("en-US", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                        timeZone: profile?.timeZone ?? "UTC",
+                      })}
+                      {" – "}
+                      {slot.endsAt.toLocaleTimeString("en-US", {
+                        timeStyle: "short",
+                        timeZone: profile?.timeZone ?? "UTC",
+                      })}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      {profile?.timeZone ?? "UTC"}
+                    </p>
+                  </div>
+                  <form action={bookAvailabilitySlot}>
+                    <input type="hidden" name="slotId" value={slot.id} />
+                    <button
+                      type="submit"
+                      disabled={!appUser}
+                      className="rounded-lg bg-blue-600 px-4 py-2 font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Book slot
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <section className="mt-12 border-t border-slate-800 pt-10">
           <h2 className="text-2xl font-semibold">Your tutoring sessions</h2>

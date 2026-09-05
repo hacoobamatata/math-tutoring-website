@@ -25,9 +25,10 @@ model AppUser {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  studentProfile  StudentProfile?
-  studentSessions TutoringSession[] @relation("StudentSessions")
-  createdSessions TutoringSession[] @relation("CreatedSessions")
+  studentProfile    StudentProfile?
+  studentSessions   TutoringSession[]  @relation("StudentSessions")
+  createdSessions   TutoringSession[]  @relation("CreatedSessions")
+  availabilitySlots AvailabilitySlot[] @relation("AvailabilitySlotCreator")
 }
 
 model StudentProfile {
@@ -43,19 +44,36 @@ model StudentProfile {
 }
 
 model TutoringSession {
-  id          String   @id @default(uuid()) @db.Uuid
-  studentId   String   @db.Uuid
-  createdById String   @db.Uuid
-  startsAt    DateTime
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                 String   @id @default(uuid()) @db.Uuid
+  studentId          String   @db.Uuid
+  createdById        String   @db.Uuid
+  availabilitySlotId String?  @unique @db.Uuid
+  startsAt           DateTime
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  student   AppUser @relation("StudentSessions", fields: [studentId], references: [id], onDelete: Restrict)
-  createdBy AppUser @relation("CreatedSessions", fields: [createdById], references: [id], onDelete: Restrict)
+  student          AppUser           @relation("StudentSessions", fields: [studentId], references: [id], onDelete: Restrict)
+  createdBy        AppUser           @relation("CreatedSessions", fields: [createdById], references: [id], onDelete: Restrict)
+  availabilitySlot AvailabilitySlot? @relation(fields: [availabilitySlotId], references: [id], onDelete: SetNull)
 
   @@index([studentId, startsAt])
   @@index([createdById, startsAt])
+}
+
+model AvailabilitySlot {
+  id          String   @id @default(uuid()) @db.Uuid
+  createdById String   @db.Uuid
+  startsAt    DateTime
+  endsAt      DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy AppUser          @relation("AvailabilitySlotCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  booking   TutoringSession?
+
+  @@index([createdById, startsAt])
+  @@index([startsAt])
 }
 
 model TestRecord {
