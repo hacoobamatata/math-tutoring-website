@@ -190,6 +190,21 @@ function readSessionInput(formData: FormData) {
   return { studentId, startsAt, notes: notes || null };
 }
 
+function readAvailabilitySlotInput(formData: FormData) {
+  const startsAt = readStaffDateTime(
+    formData,
+    "slotStartsAt",
+    "slotTime",
+  );
+  const endsAt = readStaffDateTime(formData, "slotEndsAt", "slotTime");
+
+  if (startsAt <= new Date() || endsAt <= startsAt) {
+    redirect("/dashboard?error=slotTime");
+  }
+
+  return { startsAt, endsAt };
+}
+
 export async function saveStudentProfile(formData: FormData) {
   const { userId: clerkUserId } = await auth();
 
@@ -292,16 +307,7 @@ export async function createTutoringSession(formData: FormData) {
 
 export async function createAvailabilitySlot(formData: FormData) {
   const currentUser = await requireStaffUser();
-  const startsAt = readStaffDateTime(
-    formData,
-    "slotStartsAt",
-    "slotTime",
-  );
-  const endsAt = readStaffDateTime(formData, "slotEndsAt", "slotTime");
-
-  if (startsAt <= new Date() || endsAt <= startsAt) {
-    redirect("/dashboard?error=slotTime");
-  }
+  const { startsAt, endsAt } = readAvailabilitySlotInput(formData);
 
   let created = false;
 
@@ -354,6 +360,141 @@ export async function createAvailabilitySlot(formData: FormData) {
 
   revalidatePath("/dashboard");
   redirect("/dashboard?slotCreated=1");
+}
+
+export async function updateAvailabilitySlot(formData: FormData) {
+  const currentUser = await requireStaffUser();
+  const slotId = readText(formData, "slotId");
+
+  if (!isUuid(slotId)) {
+    redirect("/dashboard?error=slot");
+  }
+
+  const { startsAt, endsAt } = readAvailabilitySlotInput(formData);
+  let result: "updated" | "conflict" | "unavailable" = "unavailable";
+
+  try {
+    result = await prisma.$transaction(
+      async (transaction) => {
+        const slot = await transaction.availabilitySlot.findFirst({
+          where: {
+            id: slotId,
+            createdById: currentUser.id,
+            booking: { is: null },
+          },
+          select: { id: true },
+        });
+
+        if (!slot) {
+          return "unavailable" as const;
+        }
+
+        const [overlappingSlot, sessionDuringSlot] = await Promise.all([
+          transaction.availabilitySlot.findFirst({
+            where: {
+              id: { not: slot.id },
+              createdById: currentUser.id,
+              startsAt: { lt: endsAt },
+              endsAt: { gt: startsAt },
+            },
+            select: { id: true },
+          }),
+          transaction.tutoringSession.findFirst({
+            where: {
+              createdById: currentUser.id,
+              startsAt: { gte: startsAt, lt: endsAt },
+            },
+            select: { id: true },
+          }),
+        ]);
+
+        if (overlappingSlot || sessionDuringSlot) {
+          return "conflict" as const;
+        }
+
+        const update = await transaction.availabilitySlot.updateMany({
+          where: {
+            id: slot.id,
+            createdById: currentUser.id,
+            booking: { is: null },
+          },
+          data: { startsAt, endsAt },
+        });
+
+        return update.count === 1 ? "updated" : "unavailable";
+      },
+      { isolationLevel: "Serializable" },
+    );
+  } catch (error) {
+    if (!hasPrismaErrorCode(error, "P2034")) {
+      throw error;
+    }
+
+    result = "conflict";
+  }
+
+  if (result === "unavailable") {
+    redirect("/dashboard?error=slot");
+  }
+
+  if (result === "conflict") {
+    redirect("/dashboard?error=slotConflict");
+  }
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?slotUpdated=1");
+}
+
+export async function deleteAvailabilitySlot(formData: FormData) {
+  const currentUser = await requireStaffUser();
+  const slotId = readText(formData, "slotId");
+
+  if (!isUuid(slotId)) {
+    redirect("/dashboard?error=slot");
+  }
+
+  let deleted = false;
+
+  try {
+    deleted = await prisma.$transaction(
+      async (transaction) => {
+        const slot = await transaction.availabilitySlot.findFirst({
+          where: {
+            id: slotId,
+            createdById: currentUser.id,
+            booking: { is: null },
+          },
+          select: { id: true },
+        });
+
+        if (!slot) {
+          return false;
+        }
+
+        const result = await transaction.availabilitySlot.deleteMany({
+          where: {
+            id: slot.id,
+            createdById: currentUser.id,
+            booking: { is: null },
+          },
+        });
+
+        return result.count === 1;
+      },
+      { isolationLevel: "Serializable" },
+    );
+  } catch (error) {
+    if (!hasPrismaErrorCode(error, "P2034")) {
+      throw error;
+    }
+  }
+
+  if (!deleted) {
+    redirect("/dashboard?error=slot");
+  }
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?slotDeleted=1");
 }
 
 export async function bookAvailabilitySlot(formData: FormData) {

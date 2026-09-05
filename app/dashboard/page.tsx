@@ -5,8 +5,10 @@ import {
   bookAvailabilitySlot,
   createAvailabilitySlot,
   createTutoringSession,
+  deleteAvailabilitySlot,
   deleteTutoringSession,
   saveStudentProfile,
+  updateAvailabilitySlot,
   updateTutoringSession,
 } from "./actions";
 
@@ -46,6 +48,8 @@ const errorMessages = {
     "Enter valid future America/Detroit times with an end after the start. Times skipped during the daylight-saving transition are not valid.",
   slotConflict:
     "That time conflicts with another availability slot or tutoring session on your schedule.",
+  slot:
+    "That availability slot was not found, is booked, or belongs to another staff user.",
   slotUnavailable: "That availability slot is no longer open.",
   studentOnly: "Only a student account can book an availability slot.",
 } as const;
@@ -58,6 +62,8 @@ type DashboardPageProps = {
     updated?: string | string[];
     deleted?: string | string[];
     slotCreated?: string | string[];
+    slotUpdated?: string | string[];
+    slotDeleted?: string | string[];
     booked?: string | string[];
   }>;
 };
@@ -138,13 +144,17 @@ export default async function DashboardPage({
     const successMessage =
       query.slotCreated === "1"
         ? "Availability slot created."
-        : query.created === "1"
-        ? "Tutoring session created."
-        : query.updated === "1"
-          ? "Tutoring session updated."
-          : query.deleted === "1"
-            ? "Tutoring session deleted."
-            : undefined;
+        : query.slotUpdated === "1"
+          ? "Availability slot updated."
+          : query.slotDeleted === "1"
+            ? "Availability slot deleted."
+            : query.created === "1"
+              ? "Tutoring session created."
+              : query.updated === "1"
+                ? "Tutoring session updated."
+                : query.deleted === "1"
+                  ? "Tutoring session deleted."
+                  : undefined;
 
     return (
       <main className="min-h-screen bg-slate-950 text-white">
@@ -348,6 +358,87 @@ export default async function DashboardPage({
                         ? ` · Booked by ${slot.booking.student.studentProfile?.preferredName ?? "Student"}`
                         : ""}
                     </p>
+
+                    {slot.booking ? (
+                      <p className="mt-4 text-sm text-slate-400">
+                        Booked slots are read-only.
+                      </p>
+                    ) : (
+                      <>
+                        <form
+                          action={updateAvailabilitySlot}
+                          className="mt-5 space-y-4 border-t border-slate-800 pt-5"
+                        >
+                          <input
+                            type="hidden"
+                            name="slotId"
+                            value={slot.id}
+                          />
+
+                          <div>
+                            <label
+                              htmlFor={`slot-start-${slot.id}`}
+                              className="block font-medium"
+                            >
+                              Start time (America/Detroit)
+                            </label>
+                            <input
+                              id={`slot-start-${slot.id}`}
+                              name="slotStartsAt"
+                              type="datetime-local"
+                              required
+                              defaultValue={formatStaffDateTimeInput(
+                                slot.startsAt,
+                              )}
+                              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor={`slot-end-${slot.id}`}
+                              className="block font-medium"
+                            >
+                              End time (America/Detroit)
+                            </label>
+                            <input
+                              id={`slot-end-${slot.id}`}
+                              name="slotEndsAt"
+                              type="datetime-local"
+                              required
+                              defaultValue={formatStaffDateTimeInput(
+                                slot.endsAt,
+                              )}
+                              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                            />
+                          </div>
+
+                          <button
+                            type="submit"
+                            className="rounded-lg bg-blue-600 px-4 py-2 font-semibold transition hover:bg-blue-500"
+                          >
+                            Save slot
+                          </button>
+                        </form>
+
+                        <form
+                          action={deleteAvailabilitySlot}
+                          className="mt-4 border-t border-slate-800 pt-4"
+                        >
+                          <input
+                            type="hidden"
+                            name="slotId"
+                            value={slot.id}
+                          />
+                          <button
+                            type="submit"
+                            className="rounded-lg border border-red-800 px-4 py-2 font-semibold text-red-300 transition hover:bg-red-950"
+                          >
+                            Delete slot
+                          </button>
+                        </form>
+                      </>
+                    )}
                   </li>
                 ))}
               </ul>
