@@ -598,6 +598,45 @@ export async function bookAvailabilitySlot(formData: FormData) {
   redirect("/dashboard?booked=1");
 }
 
+export async function cancelBookedTutoringSession(formData: FormData) {
+  const { userId: clerkUserId } = await auth();
+
+  if (!clerkUserId) {
+    redirect("/sign-in");
+  }
+
+  const currentUser = await prisma.appUser.findUnique({
+    where: { clerkUserId },
+    select: { id: true, role: true },
+  });
+
+  if (!currentUser || currentUser.role !== "STUDENT") {
+    redirect("/dashboard?error=studentOnly");
+  }
+
+  const sessionId = readText(formData, "sessionId");
+
+  if (!isUuid(sessionId)) {
+    redirect("/dashboard?error=cancellation");
+  }
+
+  const result = await prisma.tutoringSession.deleteMany({
+    where: {
+      id: sessionId,
+      studentId: currentUser.id,
+      startsAt: { gt: new Date() },
+      availabilitySlotId: { not: null },
+    },
+  });
+
+  if (result.count !== 1) {
+    redirect("/dashboard?error=cancellation");
+  }
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?cancelled=1");
+}
+
 export async function updateTutoringSession(formData: FormData) {
   const currentUser = await requireStaffUser();
   const sessionId = readText(formData, "sessionId");

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import {
   bookAvailabilitySlot,
+  cancelBookedTutoringSession,
   createAvailabilitySlot,
   createTutoringSession,
   deleteAvailabilitySlot,
@@ -51,7 +52,10 @@ const errorMessages = {
   slot:
     "That availability slot was not found, is booked, or belongs to another staff user.",
   slotUnavailable: "That availability slot is no longer open.",
-  studentOnly: "Only a student account can book an availability slot.",
+  studentOnly:
+    "Only a student account can book availability or cancel a booked session.",
+  cancellation:
+    "That session cannot be cancelled because it was not found, is not yours, is not upcoming, or was not booked from availability.",
 } as const;
 
 type DashboardPageProps = {
@@ -65,6 +69,7 @@ type DashboardPageProps = {
     slotUpdated?: string | string[];
     slotDeleted?: string | string[];
     booked?: string | string[];
+    cancelled?: string | string[];
   }>;
 };
 
@@ -587,17 +592,24 @@ export default async function DashboardPage({
       : undefined;
   const wasSaved = query.saved === "1";
   const wasBooked = query.booked === "1";
+  const wasCancelled = query.cancelled === "1";
+  const now = new Date();
   const [sessions, availabilitySlots] = await Promise.all([
     appUser
       ? prisma.tutoringSession.findMany({
           where: { studentId: appUser.id },
-          select: { id: true, startsAt: true, notes: true },
+          select: {
+            id: true,
+            availabilitySlotId: true,
+            startsAt: true,
+            notes: true,
+          },
           orderBy: { startsAt: "asc" },
         })
       : Promise.resolve([]),
     prisma.availabilitySlot.findMany({
       where: {
-        startsAt: { gt: new Date() },
+        startsAt: { gt: now },
         booking: { is: null },
         createdBy: {
           is: { role: { in: ["TUTOR", "ADMIN"] } },
@@ -642,6 +654,16 @@ export default async function DashboardPage({
             className="mt-6 rounded-lg border border-emerald-800 bg-emerald-950/50 p-4 text-emerald-200"
           >
             Your tutoring session has been booked.
+          </p>
+        )}
+
+        {wasCancelled && (
+          <p
+            role="status"
+            className="mt-6 rounded-lg border border-emerald-800 bg-emerald-950/50 p-4 text-emerald-200"
+          >
+            Your tutoring session has been cancelled and the slot is open
+            again.
           </p>
         )}
 
@@ -799,6 +821,24 @@ export default async function DashboardPage({
                     <p className="mt-3 whitespace-pre-wrap text-slate-300">
                       {session.notes}
                     </p>
+                  )}
+                  {session.availabilitySlotId && session.startsAt > now && (
+                    <form
+                      action={cancelBookedTutoringSession}
+                      className="mt-4 border-t border-slate-800 pt-4"
+                    >
+                      <input
+                        type="hidden"
+                        name="sessionId"
+                        value={session.id}
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-lg border border-red-800 px-4 py-2 font-semibold text-red-300 transition hover:bg-red-950"
+                      >
+                        Cancel session
+                      </button>
+                    </form>
                   )}
                 </li>
               ))}
